@@ -27,6 +27,11 @@ import { isWebSocketRequest, isWebSocketRequestId, WebSocketRequest } from '../.
 import { WebSocketResponse } from '../../models/websocket-response';
 import { getAuthHeader } from '../../network/authentication';
 import { fetchRequestData, getPreRequestScriptOutput, responseTransform, savePatchesMadeByScript, sendCurlAndWriteTimeline, tryToExecuteAfterResponseScript, tryToInterpolateRequest, tryToTransformRequestWithPlugins } from '../../network/network';
+import {
+  addRequestTimingRecord,
+  deleteRequestTiming,
+  endRequestTiming,
+} from '../../network/request-timing';
 import { RenderErrorSubType } from '../../templating';
 import { invariant } from '../../utils/invariant';
 import { SegmentEvent } from '../analytics';
@@ -365,11 +370,32 @@ export const sendAction: ActionFunction = async ({ request, params }) => {
   invariant(workspaceId, 'Workspace ID is required');
   const { shouldPromptForPathAfterResponse, ignoreUndefinedEnvVariable } = await request.json() as SendActionParams;
   try {
+    addRequestTimingRecord(
+      requestId,
+      {
+        stepName: 'Executing pre-request script',
+        isDone: false,
+        startedAt: Date.now(),
+        endedAt: 0,
+      },
+    );
+
     const requestData = await fetchRequestData(requestId);
     const mutatedContext = await getPreRequestScriptOutput(requestData, workspaceId);
     if (mutatedContext === null) {
       return null;
     }
+
+    addRequestTimingRecord(
+      requestId,
+      {
+        stepName: 'Rendering request',
+        isDone: false,
+        startedAt: Date.now(),
+        endedAt: 0,
+      },
+    );
+
     const renderedResult = await tryToInterpolateRequest(
       mutatedContext.request,
       mutatedContext.environment,
@@ -393,6 +419,16 @@ export const sendAction: ActionFunction = async ({ request, params }) => {
       }
     }
 
+    addRequestTimingRecord(
+      requestId,
+      {
+        stepName: 'Sending request end to end',
+        isDone: false,
+        startedAt: Date.now(),
+        endedAt: 0,
+      },
+    );
+
     const response = await sendCurlAndWriteTimeline(
       renderedRequest,
       mutatedContext.clientCertificates,
@@ -401,6 +437,8 @@ export const sendAction: ActionFunction = async ({ request, params }) => {
       requestData.timelinePath,
       requestData.responseId
     );
+
+    endRequestTiming(requestId, Date.now());
 
     const requestMeta = await models.requestMeta.getByParentId(requestId);
     invariant(requestMeta, 'RequestMeta not found');
@@ -461,6 +499,8 @@ export const sendAction: ActionFunction = async ({ request, params }) => {
       url.searchParams.set('missingKey', e?.extraInfo?.missingKey);
     }
     return redirect(`${url.pathname}?${url.searchParams}`);
+  } finally {
+    deleteRequestTiming(requestId);
   }
 };
 
