@@ -1275,7 +1275,7 @@ export const Debug: FC = () => {
                   <RealtimeResponsePane requestId={activeRequest._id} />
                 )}
                 {activeRequest && isRequest(activeRequest) && !isRealtimeRequest && (
-                  <ResponsePane runningRequests={runningRequests} />
+                  <ResponsePane runningRequests={runningRequests} activeRequestId={activeRequest._id} />
                 )}
               </ErrorBoundary>
             </Panel>
