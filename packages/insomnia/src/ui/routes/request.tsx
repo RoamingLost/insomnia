@@ -446,6 +446,16 @@ export const sendAction: ActionFunction = async ({ request, params }) => {
     const is2XXWithBodyPath = responsePatch.statusCode && responsePatch.statusCode >= 200 && responsePatch.statusCode < 300 && responsePatch.bodyPath;
     const shouldWriteToFile = shouldPromptForPathAfterResponse && is2XXWithBodyPath;
     if (requestData.request.afterResponseScript) {
+      addRequestTimingRecord(
+        requestId,
+        {
+          stepName: 'Executing after-response script',
+          isDone: false,
+          startedAt: Date.now(),
+          endedAt: 0,
+        },
+      );
+
       const baseEnvironment = await models.environment.getOrCreateForParentId(workspaceId);
       const cookieJar = await models.cookieJar.getOrCreateForParentId(workspaceId);
       const postMutatedContext = await tryToExecuteAfterResponseScript({
