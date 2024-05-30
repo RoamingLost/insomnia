@@ -590,3 +590,7 @@ export const EXPORT_TYPE_ENVIRONMENT = 'environment';
 export const EXPORT_TYPE_API_SPEC = 'api_spec';
 export const EXPORT_TYPE_PROTO_FILE = 'proto_file';
 export const EXPORT_TYPE_PROTO_DIRECTORY = 'proto_directory';
+
+export const INSOMNIA_FETCH_RETRY_TIMES = 3;
+// (ms) curently server timeout is 25s
+export const INSOMNIA_FETCH_TIME_OUT = 30000;

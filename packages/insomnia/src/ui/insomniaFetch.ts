@@ -1,5 +1,5 @@
 
-import { getApiBaseURL, getClientString, PLAYWRIGHT } from '../common/constants';
+import { getApiBaseURL, getClientString, INSOMNIA_FETCH_RETRY_TIMES, INSOMNIA_FETCH_TIME_OUT, PLAYWRIGHT } from '../common/constants';
 import { delay } from '../common/misc';
 
 interface FetchConfig {
@@ -13,13 +13,17 @@ interface FetchConfig {
   headers?: Record<string, string>;
 }
 
+const needRetry = (httpCode: number, retries: number): boolean => {
+  return (httpCode === 429 || (httpCode >= 500 && httpCode < 600)) && retries < INSOMNIA_FETCH_RETRY_TIMES;
+};
+
 const exponentialBackOff = async (url: string, init: RequestInit, retries = 0): Promise<Response> => {
   try {
     const response = await fetch(url, init);
-    if (response.status === 502 && retries < 5) {
+    if (needRetry(response.status, retries)) {
       retries++;
       await delay(retries * 1000);
-      console.log(`Received 502 from ${url} retrying`);
+      console.log(`Received ${response.status} from ${url} retrying`);
       return exponentialBackOff(url, init, retries);
     }
     if (!response.ok) {
@@ -35,6 +39,8 @@ const exponentialBackOff = async (url: string, init: RequestInit, retries = 0): 
 
 // Adds headers, retries and opens deep links returned from the api
 export async function insomniaFetch<T = void>({ method, path, data, sessionId, organizationId, origin, headers }: FetchConfig): Promise<T> {
+  const controller = new AbortController();
+  const signal = controller.signal;
   const config: RequestInit = {
     method,
     headers: {
@@ -47,15 +53,28 @@ export async function insomniaFetch<T = void>({ method, path, data, sessionId, o
       ...(PLAYWRIGHT ? { 'X-Mockbin-Test': 'true' } : {}),
     },
     ...(data ? { body: JSON.stringify(data) } : {}),
+    signal,
   };
   if (sessionId === undefined) {
     throw new Error(`No session ID provided to ${method}:${path}`);
   }
-  const response = await exponentialBackOff((origin || getApiBaseURL()) + path, config);
-  const uri = response.headers.get('x-insomnia-command');
-  if (uri) {
-    window.main.openDeepLink(uri);
+  const timeoutId = setTimeout(() => controller.abort(), INSOMNIA_FETCH_TIME_OUT);
+
+  try {
+    const response = await exponentialBackOff((origin || getApiBaseURL()) + path, config);
+    clearTimeout(timeoutId);
+    const uri = response.headers.get('x-insomnia-command');
+    if (uri) {
+      window.main.openDeepLink(uri);
+    }
+    const isJson = response.headers.get('content-type')?.includes('application/json') || path.match(/\.json$/);
+    return isJson ? response.json() : response.text();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('insomniaFetch timed out');
+    } else {
+      throw err;
+    }
   }
-  const isJson = response.headers.get('content-type')?.includes('application/json') || path.match(/\.json$/);
-  return isJson ? response.json() : response.text();
 }
