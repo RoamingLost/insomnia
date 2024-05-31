@@ -1,4 +1,3 @@
-
 import { getApiBaseURL, getClientString, INSOMNIA_FETCH_RETRY_TIMES, INSOMNIA_FETCH_TIME_OUT, PLAYWRIGHT } from '../common/constants';
 import { delay } from '../common/misc';
 
@@ -14,18 +13,26 @@ interface FetchConfig {
 }
 
 // we need to retry on 429 and 5xx errors
-const needRetry = (httpCode: number, retries: number): boolean => {
-  return (httpCode === 429 || (httpCode >= 500 && httpCode < 600)) && retries < INSOMNIA_FETCH_RETRY_TIMES;
+const needRetry = (httpCode: number, retriedCount: number): boolean => {
+  return (httpCode === 429 || httpCode >= 500) && retriedCount < INSOMNIA_FETCH_RETRY_TIMES;
 };
 
-const exponentialBackOff = async (url: string, init: RequestInit, retries = 0): Promise<Response> => {
+const exponentialBackOff = async ({
+  url,
+  init,
+  retriedCount = 0,
+}: {
+  url: string;
+  init: RequestInit;
+  retriedCount?: number;
+}): Promise<Response> => {
   try {
     const response = await fetch(url, init);
-    if (needRetry(response.status, retries)) {
-      retries++;
-      await delay(retries * 1000);
+    if (needRetry(response.status, retriedCount)) {
+      retriedCount++;
+      await delay(500);
       console.log(`Received ${response.status} from ${url} retrying`);
-      return exponentialBackOff(url, init, retries);
+      return exponentialBackOff({ url, init, retriedCount });
     }
     if (!response.ok) {
       // TODO: review error status code behaviour with backend, should we parse errors here and return response
@@ -40,8 +47,6 @@ const exponentialBackOff = async (url: string, init: RequestInit, retries = 0): 
 
 // Adds headers, retries and opens deep links returned from the api
 export async function insomniaFetch<T = void>({ method, path, data, sessionId, organizationId, origin, headers }: FetchConfig): Promise<T> {
-  const controller = new AbortController();
-  const signal = controller.signal;
   const config: RequestInit = {
     method,
     headers: {
@@ -54,16 +59,15 @@ export async function insomniaFetch<T = void>({ method, path, data, sessionId, o
       ...(PLAYWRIGHT ? { 'X-Mockbin-Test': 'true' } : {}),
     },
     ...(data ? { body: JSON.stringify(data) } : {}),
-    signal,
+    signal: AbortSignal.timeout(INSOMNIA_FETCH_TIME_OUT),
   };
+
   if (sessionId === undefined) {
     throw new Error(`No session ID provided to ${method}:${path}`);
   }
-  const timeoutId = setTimeout(() => controller.abort(), INSOMNIA_FETCH_TIME_OUT);
 
   try {
-    const response = await exponentialBackOff((origin || getApiBaseURL()) + path, config);
-    clearTimeout(timeoutId);
+    const response = await exponentialBackOff({ url: (origin || getApiBaseURL()) + path, init: config });
     const uri = response.headers.get('x-insomnia-command');
     if (uri) {
       window.main.openDeepLink(uri);
@@ -71,7 +75,6 @@ export async function insomniaFetch<T = void>({ method, path, data, sessionId, o
     const isJson = response.headers.get('content-type')?.includes('application/json') || path.match(/\.json$/);
     return isJson ? response.json() : response.text();
   } catch (err) {
-    clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
       throw new Error('insomniaFetch timed out');
     } else {
