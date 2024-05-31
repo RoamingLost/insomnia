@@ -17,7 +17,7 @@ const needRetry = (httpCode: number, retriedCount: number): boolean => {
   return (httpCode === 429 || httpCode >= 500) && retriedCount < INSOMNIA_FETCH_RETRY_TIMES;
 };
 
-const exponentialBackOff = async ({
+const fetchWithRetry = async ({
   url,
   init,
   retriedCount = 0,
@@ -32,7 +32,7 @@ const exponentialBackOff = async ({
       retriedCount++;
       await delay(500);
       console.log(`Received ${response.status} from ${url} retrying`);
-      return exponentialBackOff({ url, init, retriedCount });
+      return fetchWithRetry({ url, init, retriedCount });
     }
     if (!response.ok) {
       // TODO: review error status code behaviour with backend, should we parse errors here and return response
@@ -67,7 +67,7 @@ export async function insomniaFetch<T = void>({ method, path, data, sessionId, o
   }
 
   try {
-    const response = await exponentialBackOff({ url: (origin || getApiBaseURL()) + path, init: config });
+    const response = await fetchWithRetry({ url: (origin || getApiBaseURL()) + path, init: config });
     const uri = response.headers.get('x-insomnia-command');
     if (uri) {
       window.main.openDeepLink(uri);
