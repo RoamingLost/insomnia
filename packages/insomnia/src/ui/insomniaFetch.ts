@@ -13,6 +13,7 @@ interface FetchConfig {
   headers?: Record<string, string>;
 }
 
+// we need to retry on 429 and 5xx errors
 const needRetry = (httpCode: number, retries: number): boolean => {
   return (httpCode === 429 || (httpCode >= 500 && httpCode < 600)) && retries < INSOMNIA_FETCH_RETRY_TIMES;
 };
